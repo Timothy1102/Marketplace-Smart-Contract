@@ -90,5 +90,58 @@ pub enum StorageKey {
 
 #[near_bindgen]
 impl Contract {
-    
+    #[init]
+    pub fn new(owner_id: AccountId) -> Self {
+        Self {
+            owner_id,
+            sales: UnorderedMap::new(StorageKey::SaleKey.try_to_vec().unwrap()),
+            uses: UnorderedMap::new(StorageKey::UsesKey.try_to_vec().unwrap()),
+            creates: LookupMap::new(StorageKey::CreateKey.try_to_vec().unwrap()),
+            by_owner_id: LookupMap::new(StorageKey::ByOwnerIdKey.try_to_vec().unwrap()),
+            by_contract_id: LookupMap::new(StorageKey::ByContractIdKey.try_to_vec().unwrap()),
+            storage_deposit: LookupMap::new(StorageKey::StorageDepositKey.try_to_vec().unwrap()),
+        }
+    }
+
+    #[payable]
+    pub fn storage_deposit(&mut self, account_id: Option<AccountId>) {
+        let storage_account_id = account_id.unwrap_or(env::predecessor_account_id());
+        let deposit = env::attached_deposit();
+        assert!(
+            deposit >= STORAGE_PER_SALE,
+            "Require deposit minimum of {}",
+            STORAGE_PER_SALE
+        );
+
+        let mut balance = self.storage_deposit.get(&storage_account_id).unwrap_or(0);
+        balance += deposit;
+        self.storage_deposit.insert(&storage_account_id, &balance);
+    }
+
+    #[payable]
+    pub fn storage_withdraw(&mut self) {
+        assert_one_yocto();
+        let owner_id = env::predecessor_account_id();
+        let amount = self.storage_deposit.remove(&owner_id).unwrap_or(0);
+        let sales = self.by_owner_id.get(&owner_id);
+        let len = sales.map(|s| s.len()).unwrap_or_default();
+        let storage_required = u128::from(len) * STORAGE_PER_SALE;
+        assert!(amount >= storage_required);
+        let diff = amount - storage_required;
+        if diff > 0 {
+            Promise::new(owner_id.clone()).transfer(diff);
+        }
+
+        if storage_required > 0 {
+            self.storage_deposit.insert(&owner_id, &storage_required);
+        }
+    }
+
+    pub fn storage_minimum_balance(&self) -> U128 {
+        U128(STORAGE_PER_SALE)
+    }
+
+    pub fn storage_balance_of(&self, account_id: AccountId) -> U128 {
+        U128(self.storage_deposit.get(&account_id).unwrap_or(0))
+    }
 }
